@@ -1,0 +1,164 @@
+# Deploy Mate for Visual Studio
+
+A powerful Visual Studio extension that simplifies deployment of .NET applications to IIS servers using PowerShell remoting.
+
+## Features
+
+- **One-Click Deployment** - Deploy directly from Solution Explorer with a right-click
+- **Secure Authentication** - Test credentials before deployment
+- **Real-Time Output** - Monitor deployment progress in the Output window
+- **Smart Build Detection** - Automatically detects and builds .NET Framework and .NET 6+ projects
+- **Configuration Management** - Support for multiple deployment environments
+- **Background Processing** - Non-blocking deployments that keep Visual Studio responsive
+- **Backup & Rollback** - Automatic backup of existing files before deployment
+
+## Installation
+
+1. Download the `.vsix` file from the releases
+2. Double-click to install in Visual Studio 2022
+3. Restart Visual Studio if prompted
+
+## Quick Start
+
+### 1. Create Configuration File
+
+Right-click on your project in Solution Explorer and select **"Deploy To Server"**. If `deploy.config.json` doesn't exist, the extension will prompt you to create it.
+
+### 2. Configure Deployment Settings
+
+Edit the `deploy.config.json` file in your project root:
+
+```json
+{
+  "server": "your-server-name",
+  "poolName": "YourAppPool",
+  "appFolderLocation": "C:\\inetpub\\wwwroot\\YourApp",
+  "backupFolderLocation": "C:\\Backups\\YourApp",
+  "excludeFromCleanup": "web.config,appsettings.json",
+  "excludeFromCopy": ".git,.vs,obj,bin",
+  "defaultConfiguration": "Release"
+}
+```
+
+### 3. Deploy
+
+1. Right-click on your project
+2. Select **"Deploy To Server"**
+3. Enter your credentials and configuration name
+4. Monitor progress in the Output window
+
+## Configuration Reference
+
+### deploy.config.json
+
+| Property | Description | Example |
+|----------|-------------|---------|
+| `server` | Target server hostname or IP | `"web-server-01"` |
+| `poolName` | IIS Application Pool name | `"MyAppPool"` |
+| `appFolderLocation` | Target deployment folder on server | `"C:\\inetpub\\wwwroot\\MyApp"` |
+| `backupFolderLocation` | Backup location on server | `"C:\\Backups\\MyApp"` |
+| `excludeFromCleanup` | Files to preserve during cleanup (comma-separated) | `"web.config,appsettings.json"` |
+| `excludeFromCopy` | Files to exclude from deployment (comma-separated) | `".git,.vs,obj,bin"` |
+| `defaultConfiguration` | Default build configuration | `"Release"` |
+
+### Environment-Specific Configurations
+
+Create environment-specific config files for different deployment targets:
+
+- `deploy.config.json` - Default configuration
+- `deploy.production.config.json` - Production environment
+- `deploy.staging.config.json` - Staging environment
+- `deploy.dev.config.json` - Development environment
+
+When prompted for configuration, enter the environment name (e.g., "production") and the extension will use the corresponding config file.
+
+## Prerequisites
+
+### Server Requirements
+
+1. **Windows Server** with IIS installed
+2. **PowerShell Remoting** enabled:
+   ```powershell
+   Enable-PSRemoting -Force
+   ```
+3. **WinRM** configured and running
+4. **Network access** from your development machine to the server
+
+### Permissions
+
+- User must have administrative rights on the target server
+- User must be able to:
+  - Stop/Start IIS Application Pools
+  - Read/Write to deployment directories
+  - Create remote PowerShell sessions
+
+## How It Works
+
+1. **Credential Validation** - Tests remote connection and credentials
+2. **Project Build** - Builds the selected project using the specified configuration
+3. **Deployment Process**:
+   - Creates remote PowerShell session
+   - Stops the target application pool
+   - Creates backup of existing files
+   - Cleans target folder (preserving excluded files)
+   - Copies new files to server
+   - Starts the application pool
+   - Validates deployment
+
+## Supported Project Types
+
+- ✅ .NET 6, 7, 8, 9, 10+ (SDK-style projects)
+- ✅ .NET Core 3.1
+- ✅ ASP.NET Core Web APIs
+- ✅ ASP.NET Core MVC Applications
+- ✅ .NET Framework 4.x Web Applications
+- ❌ Class Libraries (deploy option hidden)
+
+## Troubleshooting
+
+### "Credential validation failed"
+
+- Verify WinRM is running on the target server: `Test-WSMan <server-name>`
+- Check firewall rules allow WinRM (ports 5985/5986)
+- Use domain credentials in format: `DOMAIN\username`
+
+### "Build failed"
+
+- Ensure the project builds successfully in Visual Studio
+- Check the Output window for detailed error messages
+- Verify .NET SDK is installed for the target framework
+
+### "Access Denied"
+
+- Verify user has administrative rights on the server
+- Check folder permissions on target directories
+- Ensure the application pool identity has proper permissions
+
+## Output Window
+
+Monitor deployment progress in Visual Studio:
+1. Go to **View → Output**
+2. Select **"IIS Deploy Extension"** from the dropdown
+
+All deployment steps, messages, and errors are logged here in real-time.
+
+## License
+
+MIT License - see LICENSE.txt for details
+
+## Author
+
+**Ivan Ristic**
+
+## Support
+
+For issues, questions, or contributions, please visit the project repository.
+
+## Version History
+
+### 1.0.0
+- Initial release
+- Support for .NET Framework and .NET 6+ projects
+- Configuration-based deployment
+- Real-time output streaming
+- Automatic backup and rollback support

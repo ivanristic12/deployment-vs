@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<CommandTable xmlns="http://schemas.microsoft.com/VisualStudio/2005-10-18/CommandTable" xmlns:xs="http://www.w3.org/2001/XMLSchema">
+
+  <Extern href="stdidcmd.h"/>
+  <Extern href="vsshlids.h"/>
+
+  <Commands package="guidIISDeployPackage">
+    <Groups>
+      <Group guid="guidIISDeployPackageCmdSet" id="MyMenuGroup" priority="0x0600">
+        <Parent guid="guidSHLMainMenu" id="IDM_VS_CTXT_PROJNODE"/>
+      </Group>
+    </Groups>
+
+    <Buttons>
+      <Button guid="guidIISDeployPackageCmdSet" id="DeployToIISCommandId" priority="0x0100" type="Button">
+        <Parent guid="guidIISDeployPackageCmdSet" id="MyMenuGroup" />
+        <Icon guid="guidOfficeIcon" id="msotcidNoIcon" />
+        <CommandFlag>DynamicVisibility</CommandFlag>
+        <CommandFlag>DefaultInvisible</CommandFlag>
+        <Strings>
+          <ButtonText>Deploy To Server</ButtonText>
+        </Strings>
+      </Button>
+    </Buttons>
+  </Commands>
+
+  <Symbols>
+    <GuidSymbol name="guidIISDeployPackage" value="{a1b2c3d4-5e6f-7890-abcd-ef1234567890}" />
+
+    <GuidSymbol name="guidIISDeployPackageCmdSet" value="{b2c3d4e5-6f78-90ab-cdef-123456789abc}">
+      <IDSymbol name="MyMenuGroup" value="0x1020" />
+      <IDSymbol name="DeployToIISCommandId" value="0x0100" />
+    </GuidSymbol>
+    
+    <GuidSymbol name="guidOfficeIcon" value="{d309f794-903f-11d0-9efc-00a0c911004f}">
+      <IDSymbol name="msotcidNoIcon" value="1" />
+    </GuidSymbol>
+  </Symbols>
+</CommandTable>
