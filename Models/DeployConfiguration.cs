@@ -10,7 +10,6 @@ namespace IISDeployExtension.Models
         public string BackupFolderLocation { get; set; }
         public string ExcludeFromCleanup { get; set; }
         public string ExcludeFromCopy { get; set; }
-        public string DefaultConfiguration { get; set; }
 
         public void Validate()
         {

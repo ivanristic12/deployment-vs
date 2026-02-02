@@ -18,7 +18,7 @@
         <CommandFlag>DynamicVisibility</CommandFlag>
         <CommandFlag>DefaultInvisible</CommandFlag>
         <Strings>
-          <ButtonText>Deploy To Server</ButtonText>
+          <ButtonText>Deploy to IIS</ButtonText>
         </Strings>
       </Button>
     </Buttons>

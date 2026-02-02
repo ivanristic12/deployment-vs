@@ -18,11 +18,7 @@ namespace IISDeployExtension.Dialogs
             
             validationCallback = validateCredentials;
             
-            // Set default configuration if provided
-            if (!string.IsNullOrWhiteSpace(defaultConfiguration))
-            {
-                ConfigurationTextBox.Text = defaultConfiguration;
-            }
+            // Do not pre-fill configuration field - leave empty
 
             // Focus on username field
             Loaded += (s, e) => UsernameTextBox.Focus();
@@ -42,13 +38,6 @@ namespace IISDeployExtension.Dialogs
             {
                 MessageBox.Show("Please enter a password.", "Validation Error", MessageBoxButton.OK, MessageBoxImage.Warning);
                 PasswordBox.Focus();
-                return;
-            }
-
-            if (string.IsNullOrWhiteSpace(ConfigurationTextBox.Text))
-            {
-                MessageBox.Show("Please enter a configuration name.", "Validation Error", MessageBoxButton.OK, MessageBoxImage.Warning);
-                ConfigurationTextBox.Focus();
                 return;
             }
 

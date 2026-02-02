@@ -126,21 +126,37 @@ namespace IISDeployExtension
                 string configuration = null;
 
                 // Show credentials dialog with validation callback
-                var dialog = new CredentialsDialog(config.DefaultConfiguration ?? "", (user, pass, conf) =>
+                var dialog = new CredentialsDialog("", (user, pass, conf) =>
                 {
                     try
                     {
-                        // Check for configuration-specific config file
-                        string configFileToUse = configPath;
+                        // Determine which config file to use
+                        string configFileToUse = configPath; // Default: deploy.config.json
+                        
                         if (!string.IsNullOrWhiteSpace(conf))
                         {
+                            // User entered a configuration name (e.g., "prod")
+                            // Try to find deploy.{conf}.config.json
                             string specificConfigPath = Path.Combine(projectDir, $"deploy.{conf}.config.json");
+                            
                             if (File.Exists(specificConfigPath))
                             {
+                                // Use the specific config file
                                 configFileToUse = specificConfigPath;
-                                // Re-read config from specific file
                                 config = ConfigurationReader.ReadConfiguration(configFileToUse);
                             }
+                            else
+                            {
+                                // Configuration doesn't exist, fall back to deploy.config.json
+                                configFileToUse = configPath;
+                                config = ConfigurationReader.ReadConfiguration(configFileToUse);
+                            }
+                        }
+                        else
+                        {
+                            // Empty configuration, use default deploy.config.json
+                            configFileToUse = configPath;
+                            config = ConfigurationReader.ReadConfiguration(configFileToUse);
                         }
                         
                         // Test credentials using config values
@@ -333,8 +349,7 @@ namespace IISDeployExtension
                 appFolderLocation = "",
                 backupFolderLocation = "",
                 excludeFromCleanup = "",
-                excludeFromCopy = "",
-                defaultConfiguration = "Release"
+                excludeFromCopy = ""
             };
 
             string json = System.Text.Json.JsonSerializer.Serialize(defaultConfig, new System.Text.Json.JsonSerializerOptions
@@ -574,7 +589,7 @@ namespace IISDeployExtension
                 {
                     var outWindow = Package.GetGlobalService(typeof(SVsOutputWindow)) as IVsOutputWindow;
                     var customGuid = new Guid("B2C3D4E5-6F78-90AB-CDEF-123456789ABC");
-                    outWindow?.CreatePane(ref customGuid, "IIS Deploy Extension", 1, 1);
+                    outWindow?.CreatePane(ref customGuid, "Deploy to IIS", 1, 1);
                     outWindow?.GetPane(ref customGuid, out outputPane);
                 }
 
@@ -616,7 +631,7 @@ namespace IISDeployExtension
                     {
                         var outWindow = Package.GetGlobalService(typeof(SVsOutputWindow)) as IVsOutputWindow;
                         var customGuid = new Guid("B2C3D4E5-6F78-90AB-CDEF-123456789ABC");
-                        outWindow?.CreatePane(ref customGuid, "IIS Deploy Extension", 1, 1);
+                        outWindow?.CreatePane(ref customGuid, "Deploy to IIS", 1, 1);
                         outWindow?.GetPane(ref customGuid, out outputPane);
                     }
 

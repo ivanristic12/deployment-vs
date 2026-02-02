@@ -1,4 +1,4 @@
-# Deploy Mate for Visual Studio
+# Deploy to IIS for Visual Studio
 
 A powerful Visual Studio extension that simplifies deployment of .NET applications to IIS servers using PowerShell remoting.
 
@@ -22,7 +22,7 @@ A powerful Visual Studio extension that simplifies deployment of .NET applicatio
 
 ### 1. Create Configuration File
 
-Right-click on your project in Solution Explorer and select **"Deploy To Server"**. If `deploy.config.json` doesn't exist, the extension will prompt you to create it.
+Right-click on your project in Solution Explorer and select **"Deploy to IIS"**. If `deploy.config.json` doesn't exist, the extension will prompt you to create it.
 
 ### 2. Configure Deployment Settings
 
@@ -35,16 +35,15 @@ Edit the `deploy.config.json` file in your project root:
   "appFolderLocation": "C:\\inetpub\\wwwroot\\YourApp",
   "backupFolderLocation": "C:\\Backups\\YourApp",
   "excludeFromCleanup": "web.config,appsettings.json",
-  "excludeFromCopy": ".git,.vs,obj,bin",
-  "defaultConfiguration": "Release"
+  "excludeFromCopy": "Logs,appsettings"
 }
 ```
 
 ### 3. Deploy
 
 1. Right-click on your project
-2. Select **"Deploy To Server"**
-3. Enter your credentials and configuration name
+2. Select **"Deploy to IIS"**
+3. Enter your credentials and optionally a configuration name
 4. Monitor progress in the Output window
 
 ## Configuration Reference
@@ -58,19 +57,29 @@ Edit the `deploy.config.json` file in your project root:
 | `appFolderLocation` | Target deployment folder on server | `"C:\\inetpub\\wwwroot\\MyApp"` |
 | `backupFolderLocation` | Backup location on server | `"C:\\Backups\\MyApp"` |
 | `excludeFromCleanup` | Files to preserve during cleanup (comma-separated) | `"web.config,appsettings.json"` |
-| `excludeFromCopy` | Files to exclude from deployment (comma-separated) | `".git,.vs,obj,bin"` |
-| `defaultConfiguration` | Default build configuration | `"Release"` |
+| `excludeFromCopy` | Files to exclude from deployment (comma-separated) | `"Logs,appsettings"` |
 
 ### Environment-Specific Configurations
 
-Create environment-specific config files for different deployment targets:
+You can create environment-specific config files for different deployment targets:
 
-- `deploy.config.json` - Default configuration
-- `deploy.production.config.json` - Production environment
+- `deploy.config.json` - Default configuration (used when Configuration field is empty or specified config doesn't exist)
+- `deploy.prod.config.json` - Production environment
 - `deploy.staging.config.json` - Staging environment
 - `deploy.dev.config.json` - Development environment
 
-When prompted for configuration, enter the environment name (e.g., "production") and the extension will use the corresponding config file.
+**How it works:**
+
+1. **Empty Configuration Field**: If you leave the Configuration field empty in the dialog, `deploy.config.json` will be used.
+
+2. **Specific Configuration**: Enter a configuration name (e.g., "prod") in the Configuration field, and the extension will look for `deploy.prod.config.json`. 
+
+3. **Fallback Behavior**: If you enter a configuration name that doesn't have a corresponding file (e.g., "test" but no `deploy.test.config.json`), the extension will automatically fall back to using `deploy.config.json`.
+
+**Examples:**
+- Leave Configuration empty → uses `deploy.config.json`
+- Enter "prod" → uses `deploy.prod.config.json` (if exists) or `deploy.config.json` (fallback)
+- Enter "staging" → uses `deploy.staging.config.json` (if exists) or `deploy.config.json` (fallback)
 
 ## Prerequisites
 
@@ -120,7 +129,7 @@ When prompted for configuration, enter the environment name (e.g., "production")
 
 - Verify WinRM is running on the target server: `Test-WSMan <server-name>`
 - Check firewall rules allow WinRM (ports 5985/5986)
-- Use domain credentials in format: `DOMAIN\username`
+- Use domain credentials without: `username`
 
 ### "Build failed"
 
@@ -138,7 +147,7 @@ When prompted for configuration, enter the environment name (e.g., "production")
 
 Monitor deployment progress in Visual Studio:
 1. Go to **View → Output**
-2. Select **"IIS Deploy Extension"** from the dropdown
+2. Select **"Deploy to IIS"** from the dropdown
 
 All deployment steps, messages, and errors are logged here in real-time.
 
