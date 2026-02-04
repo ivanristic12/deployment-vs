@@ -211,64 +211,115 @@ try {
     $deploymentState.RemoteTempCreated = $true
     Write-Info "Remote temp folder created: $remoteTemp"
 
-    # Convert remote temp path to UNC for fast file copying
+    # Try UNC/robocopy first (fast), fallback to Copy-Item if UNC not accessible
     Write-Info "Copying files to remote server..."
-    $uncRemoteTemp = Convert-LocalPathToUNC -LocalPath $remoteTemp
+    $copySucceeded = $false
     
-    # Build robocopy exclude arguments
-    # ExcludeFromCopy patterns: treat as directory if no extension or starts with dot
-    $excludeDirs = @()
-    $excludeFiles = @()
-    
-    foreach ($pattern in $ExcludeFromCopy) {
-        # Remove wildcards for robocopy
-        $cleanPattern = $pattern -replace '\*', ''
+    try {
+        # Check if UNC path is accessible
+        $uncRemoteTemp = Convert-LocalPathToUNC -LocalPath $remoteTemp
         
-        # Check if pattern looks like a directory (no extension after last part)
-        if ($cleanPattern -notmatch '\.[a-zA-Z0-9]+$') {
-            # Treat as directory (e.g., "bin", "obj", ".git")
-            $excludeDirs += $cleanPattern
-        } else {
-            # Treat as file (e.g., "web.config", "*.dll")
-            $excludeFiles += $pattern
+        if (Test-Path $uncRemoteTemp -ErrorAction Stop) {
+            Write-Info "UNC path accessible - using robocopy for fast transfer..."
+            
+            # Build robocopy exclude arguments
+            $excludeDirs = @()
+            $excludeFiles = @()
+            
+            foreach ($pattern in $ExcludeFromCopy) {
+                $cleanPattern = $pattern -replace '\*', ''
+                
+                if ($cleanPattern -notmatch '\.[a-zA-Z0-9]+$') {
+                    $excludeDirs += $cleanPattern
+                } else {
+                    $excludeFiles += $pattern
+                }
+            }
+            
+            # Build robocopy command arguments
+            $robocopyArgs = @(
+                $NewFilesPath,
+                $uncRemoteTemp,
+                "/E", "/MT:16", "/R:2", "/W:1", "/NFL", "/NDL", "/NP"
+            )
+            
+            if ($excludeDirs.Count -gt 0) {
+                $robocopyArgs += "/XD"
+                $robocopyArgs += $excludeDirs
+            }
+            
+            if ($excludeFiles.Count -gt 0) {
+                $robocopyArgs += "/XF"
+                $robocopyArgs += $excludeFiles
+            }
+            
+            # Execute robocopy
+            $robocopyResult = Start-Process -FilePath "robocopy.exe" -ArgumentList $robocopyArgs -Wait -NoNewWindow -PassThru -RedirectStandardOutput "$env:TEMP\robocopy_out.txt" -RedirectStandardError "$env:TEMP\robocopy_err.txt"
+            
+            # Robocopy exit codes: 0-7 are success, 8+ are errors
+            if ($robocopyResult.ExitCode -ge 8) {
+                $output = Get-Content "$env:TEMP\robocopy_out.txt" -Raw -ErrorAction SilentlyContinue
+                Write-Warning "Robocopy failed with exit code $($robocopyResult.ExitCode). Output: $output"
+                throw "Robocopy failed"
+            }
+            
+            $copySucceeded = $true
+            Write-Success "Files copied successfully with robocopy."
         }
+    } catch {
+        Write-Warning "UNC/robocopy not available: $_"
+        Write-Info "Falling back to PowerShell remoting copy method..."
     }
     
-    # Build robocopy command arguments
-    $robocopyArgs = @(
-        $NewFilesPath,
-        $uncRemoteTemp,
-        "/E",              # Copy subdirectories including empty ones
-        "/MT:16",          # Multi-threaded copy (16 threads)
-        "/R:2",            # Retry 2 times on failed copies
-        "/W:1",            # Wait 1 second between retries
-        "/NFL",            # No file list (reduces output)
-        "/NDL",            # No directory list
-        "/NP"              # No progress percentage
-    )
-    
-    # Add exclude directories
-    if ($excludeDirs.Count -gt 0) {
-        $robocopyArgs += "/XD"
-        $robocopyArgs += $excludeDirs
-    }
-    
-    # Add exclude files
-    if ($excludeFiles.Count -gt 0) {
-        $robocopyArgs += "/XF"
-        $robocopyArgs += $excludeFiles
-    }
-    
-    # Execute robocopy (suppress output)
-    $robocopyResult = Start-Process -FilePath "robocopy.exe" -ArgumentList $robocopyArgs -Wait -NoNewWindow -PassThru -RedirectStandardOutput "$env:TEMP\robocopy_out.txt" -RedirectStandardError "$env:TEMP\robocopy_err.txt"
-    
-    # Robocopy exit codes: 0-7 are success, 8+ are errors
-    if ($robocopyResult.ExitCode -ge 8) {
-        throw "Robocopy failed with exit code $($robocopyResult.ExitCode)."
+    # Fallback: Use Copy-Item with PowerShell session
+    if (-not $copySucceeded) {
+        Write-Info "Using Copy-Item through PowerShell session..."
+        
+        # Get files to copy, respecting exclusions
+        $allFiles = Get-ChildItem -Path $NewFilesPath -Recurse -File
+        $filesToCopy = @()
+        
+        foreach ($file in $allFiles) {
+            $shouldExclude = $false
+            $relativePath = $file.FullName.Substring($NewFilesPath.Length + 1)
+            
+            foreach ($pattern in $ExcludeFromCopy) {
+                if ($file.Name -like $pattern -or $relativePath -like $pattern -or $relativePath -like "*\$pattern\*") {
+                    $shouldExclude = $true
+                    break
+                }
+            }
+            
+            if (-not $shouldExclude) {
+                $filesToCopy += @{
+                    SourcePath = $file.FullName
+                    RelativePath = $relativePath
+                }
+            }
+        }
+        
+        Write-Info "Copying $($filesToCopy.Count) files..."
+        
+        foreach ($fileInfo in $filesToCopy) {
+            $destPath = Join-Path $remoteTemp $fileInfo.RelativePath
+            $destDir = Split-Path $destPath -Parent
+            
+            # Create remote directory if needed
+            Invoke-Command -Session $session -ScriptBlock {
+                param($dir)
+                if (-not (Test-Path $dir)) {
+                    New-Item -Path $dir -ItemType Directory -Force | Out-Null
+                }
+            } -ArgumentList $destDir
+            
+            # Copy file through session
+            Copy-Item -Path $fileInfo.SourcePath -Destination $destPath -ToSession $session -Force
+        }
+        
+        Write-Success "Files copied successfully with Copy-Item."
     }
     
     $deploymentState.FilesCopied = $true
-    Write-Success "Files copied successfully."
 
     # Execute deployment with detailed state tracking
     $deployResult = Invoke-Command -Session $session -ScriptBlock {
