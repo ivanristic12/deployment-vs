@@ -4,6 +4,7 @@ using System.IO;
 using System.Reflection;
 using System.Security;
 using System.Linq;
+using System.Text;
 using Microsoft.VisualStudio.Shell;
 using Microsoft.VisualStudio.Shell.Interop;
 using Task = System.Threading.Tasks.Task;
@@ -215,17 +216,18 @@ namespace IISDeployExtension
                 WriteOutput($"Configuration: {configuration}");
                 WriteOutput("========================================");
 
-                // Build the project
-                WriteOutput("\nBuilding project...");
+                // Publish the project
+                WriteOutput("\nPublishing project...");
                 string buildOutputPath = BuildProject(project, configuration);
 
                 if (string.IsNullOrEmpty(buildOutputPath))
                 {
-                    ShowMessage("Error", "Build failed. Check the Output window for details.");
+                    ShowMessage("Error", "Publish failed. Check the Output window for details.");
                     return;
                 }
 
-                WriteOutput($"Build completed successfully!");
+                WriteOutput($"Publish completed successfully!");
+                WriteOutput($"Output path: {buildOutputPath}");
 
                 // Deploy using the template script
                 WriteOutput("\n========================================");
@@ -421,17 +423,25 @@ namespace IISDeployExtension
                 string projectDir = GetProjectDirectory(project);
                 string projectFile = project.FileName;
                 
+                // Use Release as default if no configuration specified
+                string buildConfig = string.IsNullOrWhiteSpace(configuration) ? "Release" : configuration;
+                
                 // Check if it's an SDK-style project (.NET Core/.NET 5+)
+                // SDK-style projects use dotnet publish for deployment
                 bool isSdkStyleProject = IsSdkStyleProject(projectFile);
                 string targetFramework = GetTargetFramework(projectFile);
                 
                 if (isSdkStyleProject)
                 {
-                    // Use dotnet build for SDK-style projects
+                    // Use dotnet publish for SDK-style projects with explicit output path
+                    string publishPath = Path.Combine(projectDir, "bin", buildConfig, "publish");
+                    
+                    WriteOutput($"Publishing to: {publishPath}");
+                    
                     var startInfo = new System.Diagnostics.ProcessStartInfo
                     {
                         FileName = "dotnet",
-                        Arguments = $"build \"{projectFile}\" -c {configuration} --nologo -v:q",
+                        Arguments = $"publish \"{projectFile}\" -c {buildConfig} -o \"{publishPath}\" --no-self-contained",
                         RedirectStandardOutput = true,
                         RedirectStandardError = true,
                         UseShellExecute = false,
@@ -447,7 +457,7 @@ namespace IISDeployExtension
                         
                         if (process.ExitCode != 0)
                         {
-                            WriteOutput($"Build failed with exit code {process.ExitCode}");
+                            WriteOutput($"Publish failed with exit code {process.ExitCode}");
                             if (!string.IsNullOrWhiteSpace(errors))
                             {
                                 WriteOutput(errors);
@@ -460,31 +470,17 @@ namespace IISDeployExtension
                         }
                     }
                     
-                    // Get output path for SDK-style project
-                    string outputPath = Path.Combine(projectDir, "bin", configuration);
+                    WriteOutput("Publish finished.");
                     
-                    if (!string.IsNullOrEmpty(targetFramework))
+                    // Verify publish folder exists
+                    if (Directory.Exists(publishPath))
                     {
-                        outputPath = Path.Combine(outputPath, targetFramework);
+                        WriteOutput($"Publish successful: {publishPath}");
+                        return publishPath;
                     }
                     
-                    if (Directory.Exists(outputPath))
-                    {
-                        return outputPath;
-                    }
-                    
-                    // Fallback: search for any framework folder
-                    string binConfigPath = Path.Combine(projectDir, "bin", configuration);
-                    if (Directory.Exists(binConfigPath))
-                    {
-                        var frameworks = Directory.GetDirectories(binConfigPath);
-                        if (frameworks.Length > 0)
-                        {
-                            // Get the first framework folder (net6.0, net7.0, etc.)
-                            outputPath = frameworks[0];
-                            return outputPath;
-                        }
-                    }
+                    WriteOutput($"ERROR: Publish folder not found at {publishPath}");
+                    return null;
                 }
                 else
                 {
@@ -494,7 +490,7 @@ namespace IISDeployExtension
                     // Find and activate the correct configuration
                     foreach (SolutionConfiguration2 config in solutionBuild.SolutionConfigurations)
                     {
-                        if (config.Name.Equals(configuration, StringComparison.OrdinalIgnoreCase))
+                        if (config.Name.Equals(buildConfig, StringComparison.OrdinalIgnoreCase))
                         {
                             config.Activate();
                             break;

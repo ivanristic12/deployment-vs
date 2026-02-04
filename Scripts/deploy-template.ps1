@@ -213,6 +213,8 @@ try {
 
     # Try UNC/robocopy first (fast), fallback to Copy-Item if UNC not accessible
     Write-Info "Copying files to remote server..."
+    Write-Info "Source path (NewFilesPath): $NewFilesPath"
+    Write-Info "Destination (remoteTemp): $remoteTemp"
     $copySucceeded = $false
     
     try {
@@ -237,10 +239,13 @@ try {
             }
             
             # Build robocopy command arguments
+            # Use /MIR or /E to copy contents (not the folder itself)
+            Write-Info "Robocopy source: $NewFilesPath"
+            Write-Info "Robocopy destination: $uncRemoteTemp"
             $robocopyArgs = @(
                 $NewFilesPath,
                 $uncRemoteTemp,
-                "/E", "/MT:16", "/R:2", "/W:1", "/NFL", "/NDL", "/NP"
+                "/MIR", "/MT:16", "/R:2", "/W:1", "/NP"
             )
             
             if ($excludeDirs.Count -gt 0) {
@@ -440,7 +445,16 @@ try {
 
             # Copy new files
             Write-Log "Deploying new files..."
-            Copy-Item "$NewFilesPath\*" -Destination $AppFolderLocation -Recurse -Force
+            Write-Log "Remote temp path: $NewFilesPath"
+            Write-Log "App folder: $AppFolderLocation"
+            Write-Log "Remote temp contents:"
+            Get-ChildItem $NewFilesPath | ForEach-Object { Write-Log "  - $($_.Name)" }
+            # Ensure we copy contents, not the folder itself
+            if ($NewFilesPath.EndsWith('\')) {
+                Copy-Item "$($NewFilesPath)*" -Destination $AppFolderLocation -Recurse -Force
+            } else {
+                Copy-Item "$NewFilesPath\*" -Destination $AppFolderLocation -Recurse -Force
+            }
             Write-Log "New files deployed."
 
             # Start app pool
@@ -480,9 +494,14 @@ try {
     }
 
     # Clean up remote temp folder
-    Write-Info "Cleaning remote temp folder..."
-    $uncRemoteTempCleanup = Convert-LocalPathToUNC -LocalPath $remoteTemp
-    Remove-Item -Path $uncRemoteTempCleanup -Recurse -Force -ErrorAction SilentlyContinue
+    Write-Info "Cleaning up remote temp folder..."
+    Invoke-Command -Session $session -ScriptBlock {
+        param($tempPath)
+        if (Test-Path $tempPath) {
+            Remove-Item -Path $tempPath -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    } -ArgumentList $remoteTemp
+    Write-Success "Remote temp folder cleaned up."
     $deploymentState.RemoteTempCreated = $false
 
     Write-Success "Deployment finished successfully."
