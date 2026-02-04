@@ -117,19 +117,19 @@ namespace IISDeployExtension.Services
                 args.Append($" -NewFilesPath \"{newFilesPath}\"");
                 args.Append($" -BackupFolder \"{backupFolder}\"");
 
-                // Handle exclude arrays
+                // Handle exclude arrays - pass as comma-separated values
                 if (!string.IsNullOrEmpty(excludeFromCleanup))
                 {
                     var items = excludeFromCleanup.Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries)
-                        .Select(x => $"'{x.Trim()}'");
-                    args.Append($" -ExcludeFromCleanup @({string.Join(",", items)})");
+                        .Select(x => x.Trim());
+                    args.Append($" -ExcludeFromCleanup \"{string.Join(",", items)}\"");
                 }
 
                 if (!string.IsNullOrEmpty(excludeFromCopy))
                 {
                     var items = excludeFromCopy.Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries)
-                        .Select(x => $"'{x.Trim()}'");
-                    args.Append($" -ExcludeFromCopy @({string.Join(",", items)})");
+                        .Select(x => x.Trim());
+                    args.Append($" -ExcludeFromCopy \"{string.Join(",", items)}\"");
                 }
 
                 var startInfo = new ProcessStartInfo

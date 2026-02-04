@@ -145,12 +145,22 @@ namespace IISDeployExtension
                                 // Use the specific config file
                                 configFileToUse = specificConfigPath;
                                 config = ConfigurationReader.ReadConfiguration(configFileToUse);
+                                System.Windows.MessageBox.Show(
+                                    $"Using configuration file: {Path.GetFileName(configFileToUse)}",
+                                    "Configuration Selected",
+                                    System.Windows.MessageBoxButton.OK,
+                                    System.Windows.MessageBoxImage.Information);
                             }
                             else
                             {
                                 // Configuration doesn't exist, fall back to deploy.config.json
                                 configFileToUse = configPath;
                                 config = ConfigurationReader.ReadConfiguration(configFileToUse);
+                                System.Windows.MessageBox.Show(
+                                    $"Configuration '{conf}' not found.\nFile 'deploy.{conf}.config.json' does not exist.\n\nUsing default: deploy.config.json",
+                                    "Configuration Fallback",
+                                    System.Windows.MessageBoxButton.OK,
+                                    System.Windows.MessageBoxImage.Warning);
                             }
                         }
                         else
