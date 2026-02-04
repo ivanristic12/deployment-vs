@@ -445,10 +445,6 @@ try {
 
             # Copy new files
             Write-Log "Deploying new files..."
-            Write-Log "Remote temp path: $NewFilesPath"
-            Write-Log "App folder: $AppFolderLocation"
-            Write-Log "Remote temp contents:"
-            Get-ChildItem $NewFilesPath | ForEach-Object { Write-Log "  - $($_.Name)" }
             # Ensure we copy contents, not the folder itself
             if ($NewFilesPath.EndsWith('\')) {
                 Copy-Item "$($NewFilesPath)*" -Destination $AppFolderLocation -Recurse -Force
