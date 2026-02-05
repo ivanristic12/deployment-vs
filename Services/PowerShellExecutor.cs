@@ -92,8 +92,8 @@ namespace IISDeployExtension.Services
             string appFolderLocation,
             string newFilesPath,
             string backupFolder,
-            string excludeFromCleanup,
-            string excludeFromCopy,
+            string[] excludeFromCleanup,
+            string[] excludeFromCopy,
             Action<string> outputCallback = null)
         {
             var result = new PowerShellResult();
@@ -118,17 +118,15 @@ namespace IISDeployExtension.Services
                 args.Append($" -BackupFolder \"{backupFolder}\"");
 
                 // Handle exclude arrays - pass as comma-separated values
-                if (!string.IsNullOrEmpty(excludeFromCleanup))
+                if (excludeFromCleanup != null && excludeFromCleanup.Length > 0)
                 {
-                    var items = excludeFromCleanup.Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries)
-                        .Select(x => x.Trim());
+                    var items = excludeFromCleanup.Where(x => !string.IsNullOrWhiteSpace(x)).Select(x => x.Trim());
                     args.Append($" -ExcludeFromCleanup \"{string.Join(",", items)}\"");
                 }
 
-                if (!string.IsNullOrEmpty(excludeFromCopy))
+                if (excludeFromCopy != null && excludeFromCopy.Length > 0)
                 {
-                    var items = excludeFromCopy.Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries)
-                        .Select(x => x.Trim());
+                    var items = excludeFromCopy.Where(x => !string.IsNullOrWhiteSpace(x)).Select(x => x.Trim());
                     args.Append($" -ExcludeFromCopy \"{string.Join(",", items)}\"");
                 }
 

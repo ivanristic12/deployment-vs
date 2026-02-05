@@ -34,8 +34,8 @@ Edit the `deploy.config.json` file in your project root:
   "poolName": "YourAppPool",
   "appFolderLocation": "C:\\inetpub\\wwwroot\\YourApp",
   "backupFolderLocation": "C:\\Backups\\YourApp",
-  "excludeFromCleanup": "web.config,appsettings.json",
-  "excludeFromCopy": "Logs,appsettings"
+  "excludeFromCleanup": ["Logs", "appsettings.json", "web.config"],
+  "excludeFromCopy": ["node_modules", ".git"]
 }
 ```
 
@@ -56,8 +56,8 @@ Edit the `deploy.config.json` file in your project root:
 | `poolName` | IIS Application Pool name | `"MyAppPool"` |
 | `appFolderLocation` | Target deployment folder on server | `"C:\\inetpub\\wwwroot\\MyApp"` |
 | `backupFolderLocation` | Backup location on server | `"C:\\Backups\\MyApp"` |
-| `excludeFromCleanup` | Files to preserve during cleanup (comma-separated) | `"web.config,appsettings.json"` |
-| `excludeFromCopy` | Files to exclude from deployment (comma-separated) | `"Logs,appsettings"` |
+| `excludeFromCleanup` | Array of files/folders to preserve during cleanup | `["Logs", "web.config", "appsettings.json"]` |
+| `excludeFromCopy` | Array of files/folders to exclude from deployment | `["node_modules", ".git", "*.log"]` |
 
 ### Environment-Specific Configurations
 
@@ -104,7 +104,7 @@ You can create environment-specific config files for different deployment target
 ## How It Works
 
 1. **Credential Validation** - Tests remote connection and credentials
-2. **Project Build** - Builds the selected project using the specified configuration
+2. **Project Publish** - Publishes the project with a clean build (deletes old output first)
 3. **Deployment Process**:
    - Creates remote PowerShell session
    - Stops the target application pool
@@ -113,6 +113,17 @@ You can create environment-specific config files for different deployment target
    - Copies new files to server
    - Starts the application pool
    - Validates deployment
+
+## Build and Publish
+
+The extension automatically performs a **clean publish** every time:
+
+1. **Deletes** the previous publish folder to ensure fresh output
+2. **Rebuilds** the entire project from scratch with `--force` flag
+3. **Publishes** all files with today's timestamps
+4. **Includes** all runtime dependencies needed for deployment
+
+This ensures you always deploy the latest code with no stale files.
 
 ## Supported Project Types
 

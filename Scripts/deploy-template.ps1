@@ -11,10 +11,6 @@ param(
     [string]$ExcludeFromCopy = ""      # Comma-separated list of files to exclude when copying from source
 )
 
-# Convert comma-separated strings to arrays
-$ExcludeFromCleanupArray = if ($ExcludeFromCleanup) { $ExcludeFromCleanup -split ',' | ForEach-Object { $_.Trim() } } else { @() }
-$ExcludeFromCopyArray = if ($ExcludeFromCopy) { $ExcludeFromCopy -split ',' | ForEach-Object { $_.Trim() } } else { @() }
- 
 #----------------------------Functions---------------------------------------- 
 function Convert-LocalPathToUNC {
     param(
@@ -221,6 +217,17 @@ try {
     Write-Info "Destination (remoteTemp): $remoteTemp"
     $copySucceeded = $false
     
+    # Split exclusion string into array for use in both copy methods
+    $ExcludeFromCopyArray = if ($ExcludeFromCopy) { 
+        $ExcludeFromCopy -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ } 
+    } else { 
+        @() 
+    }
+    
+    if ($ExcludeFromCopyArray.Count -gt 0) {
+        Write-Info "Excluding from copy: [$($ExcludeFromCopyArray -join ', ')]"
+    }
+    
     try {
         # Check if UNC path is accessible
         $uncRemoteTemp = Convert-LocalPathToUNC -LocalPath $remoteTemp
@@ -234,11 +241,15 @@ try {
             
             foreach ($pattern in $ExcludeFromCopyArray) {
                 $trimmedPattern = $pattern.Trim()
-                # Determine if it's a directory or file based on extension
-                # Robocopy supports wildcards, so append * for startsWith behavior
-                if ($trimmedPattern -notmatch '\.[a-zA-Z0-9]+$') {
-                    $excludeDirs += "$trimmedPattern*"
+                # For robocopy: treat patterns as both file and folder exclusions
+                # If pattern has extension like .json, it's definitely a file
+                # If no extension, could match folders OR files starting with that name
+                if ($trimmedPattern -match '\.[a-zA-Z0-9]+$') {
+                    # Has extension - exclude as file
+                    $excludeFiles += $trimmedPattern
                 } else {
+                    # No extension - exclude both as folder and as file prefix
+                    $excludeDirs += $trimmedPattern
                     $excludeFiles += "$trimmedPattern*"
                 }
             }
@@ -295,11 +306,12 @@ try {
             
             foreach ($pattern in $ExcludeFromCopyArray) {
                 $trimmedPattern = $pattern.Trim()
-                # Check if any part of the relative path starts with the pattern
-                # Split path into segments and check each one
-                $pathSegments = $relativePath -split '\\\\'
+                # Check if the file name or any folder in path matches the pattern
+                $fileName = [System.IO.Path]::GetFileName($relativePath)
+                $pathSegments = $relativePath.Split('\', [System.StringSplitOptions]::RemoveEmptyEntries)
+                
                 foreach ($segment in $pathSegments) {
-                    if ($segment -like "$trimmedPattern*") {
+                    if ($segment -like "$trimmedPattern*" -or $segment -eq $trimmedPattern) {
                         $shouldExclude = $true
                         break
                     }
@@ -340,11 +352,18 @@ try {
 
     # Execute deployment with detailed state tracking
     $deployResult = Invoke-Command -Session $session -ScriptBlock {
-        param($AppPoolName, $AppFolderLocation, $NewFilesPath, $BackupFolder, [string[]]$ExcludeFromCleanup)
+        param($AppPoolName, $AppFolderLocation, $NewFilesPath, $BackupFolder, [string]$ExcludeFromCleanup)
 
         function Write-Log { 
             param($m) 
             Write-Host "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') - $m" 
+        }
+        
+        # Split the comma-separated string into array HERE in the scriptblock
+        $ExcludeArray = if ($ExcludeFromCleanup) { 
+            $ExcludeFromCleanup -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ } 
+        } else { 
+            @() 
         }
 
         # Return object to track deployment state
@@ -417,8 +436,10 @@ try {
 			# Clean target folder, respecting exclusions
 			Write-Log "Cleaning target folder..."
 			
-			if ($ExcludeFromCleanup.Count -gt 0) {
-				Write-Log "Exclusion patterns: $($ExcludeFromCleanup -join ', ')"
+			if ($ExcludeArray.Count -gt 0) {
+				Write-Log "Files/folders to preserve: $($ExcludeArray -join ', ')"
+			} else {
+				Write-Log "No exclusions - ALL files will be removed"
 			}
 			
 			$allItems = Get-ChildItem -Path $AppFolderLocation -Force
@@ -426,12 +447,15 @@ try {
 			# Find all items that match exclusion patterns (direct children only)
 			foreach ($item in $allItems) {
 				$shouldKeep = $false
-				foreach ($ex in $ExcludeFromCleanup) {
-					$pattern = $ex.Trim()
-					if ($item.Name -like "$pattern*") {
-						$shouldKeep = $true
-						Write-Log "Preserving: $($item.Name)"
-						break
+				
+				if ($ExcludeArray.Count -gt 0) {
+					foreach ($ex in $ExcludeArray) {
+						$pattern = $ex.Trim()
+						if ($item.Name -eq $pattern -or $item.Name -like "$pattern*") {
+							$shouldKeep = $true
+							Write-Log "Preserving: $($item.Name)"
+							break
+						}
 					}
 				}
 				
@@ -481,7 +505,7 @@ try {
             Write-Log "Error during deployment: $_"
             return $result
         }
-    } -ArgumentList $AppPoolName, $AppFolderLocation, $remoteTemp, $BackupFolder, (,$ExcludeFromCleanupArray)
+    } -ArgumentList $AppPoolName, $AppFolderLocation, $remoteTemp, $BackupFolder, $ExcludeFromCleanup
 
     # Update deployment state based on remote results
     $deploymentState.AppPoolStopped = $deployResult.AppPoolStopped

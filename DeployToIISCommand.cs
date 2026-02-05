@@ -360,8 +360,8 @@ namespace IISDeployExtension
                 poolName = "",
                 appFolderLocation = "",
                 backupFolderLocation = "",
-                excludeFromCleanup = "",
-                excludeFromCopy = ""
+                excludeFromCleanup = new string[] { },
+                excludeFromCopy = new string[] { }
             };
 
             string json = System.Text.Json.JsonSerializer.Serialize(defaultConfig, new System.Text.Json.JsonSerializerOptions
@@ -446,12 +446,29 @@ namespace IISDeployExtension
                     // Use dotnet publish for SDK-style projects with explicit output path
                     string publishPath = Path.Combine(projectDir, "bin", buildConfig, "publish");
                     
+                    // Clean the publish folder to ensure fresh build
+                    if (Directory.Exists(publishPath))
+                    {
+                        WriteOutput($"Cleaning existing publish folder: {publishPath}");
+                        try
+                        {
+                            Directory.Delete(publishPath, true);
+                            WriteOutput("Publish folder cleaned successfully.");
+                        }
+                        catch (Exception ex)
+                        {
+                            WriteOutput($"Warning: Could not delete publish folder: {ex.Message}");
+                            WriteOutput("Continuing with publish (files will be overwritten)...");
+                        }
+                    }
+                    
                     WriteOutput($"Publishing to: {publishPath}");
+                    WriteOutput($"Configuration: {buildConfig}");
                     
                     var startInfo = new System.Diagnostics.ProcessStartInfo
                     {
                         FileName = "dotnet",
-                        Arguments = $"publish \"{projectFile}\" -c {buildConfig} -o \"{publishPath}\" --no-self-contained",
+                        Arguments = $"publish \"{projectFile}\" -c {buildConfig} -o \"{publishPath}\" --no-self-contained --force",
                         RedirectStandardOutput = true,
                         RedirectStandardError = true,
                         UseShellExecute = false,
@@ -461,9 +478,33 @@ namespace IISDeployExtension
 
                     using (var process = System.Diagnostics.Process.Start(startInfo))
                     {
-                        string output = process.StandardOutput.ReadToEnd();
-                        string errors = process.StandardError.ReadToEnd();
+                        // Stream filtered output - only show important messages
+                        while (!process.StandardOutput.EndOfStream)
+                        {
+                            string line = process.StandardOutput.ReadLine();
+                            if (!string.IsNullOrWhiteSpace(line))
+                            {
+                                // Only show important messages, filter out verbose build details
+                                if (line.Contains("Restoring") || 
+                                    line.Contains("Restored") ||
+                                    line.Contains("Build succeeded") ||
+                                    line.Contains("Build FAILED") ||
+                                    line.Contains("->") && line.Contains(".dll") ||
+                                    line.Contains("Publishing") ||
+                                    line.Contains("Published") ||
+                                    line.Contains("error") ||
+                                    line.Contains("warning") ||
+                                    line.Contains("Time Elapsed"))
+                                {
+                                    WriteOutput(line.Trim());
+                                }
+                            }
+                        }
+                        
                         process.WaitForExit();
+                        
+                        // Check for errors
+                        string errors = process.StandardError.ReadToEnd();
                         
                         if (process.ExitCode != 0)
                         {
@@ -472,11 +513,14 @@ namespace IISDeployExtension
                             {
                                 WriteOutput(errors);
                             }
-                            if (!string.IsNullOrWhiteSpace(output))
-                            {
-                                WriteOutput(output);
-                            }
                             return null;
+                        }
+                        
+                        // Show any warnings
+                        if (!string.IsNullOrWhiteSpace(errors))
+                        {
+                            WriteOutput("Warnings:");
+                            WriteOutput(errors);
                         }
                     }
                     
