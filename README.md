@@ -34,8 +34,8 @@ Edit the `deploy.config.json` file in your project root:
   "poolName": "YourAppPool",
   "appFolderLocation": "C:\\inetpub\\wwwroot\\YourApp",
   "backupFolderLocation": "C:\\Backups\\YourApp",
-  "excludeFromCleanup": ["Logs", "appsettings.json", "web.config"],
-  "excludeFromCopy": ["node_modules", ".git"]
+  "excludeFromCleanup": ["Logs", "appsettings", "web.config"],
+  "excludeFromCopy": ["appsettings"]
 }
 ```
 
@@ -56,8 +56,8 @@ Edit the `deploy.config.json` file in your project root:
 | `poolName` | IIS Application Pool name | `"MyAppPool"` |
 | `appFolderLocation` | Target deployment folder on server | `"C:\\inetpub\\wwwroot\\MyApp"` |
 | `backupFolderLocation` | Backup location on server | `"C:\\Backups\\MyApp"` |
-| `excludeFromCleanup` | Array of files/folders to preserve during cleanup | `["Logs", "web.config", "appsettings.json"]` |
-| `excludeFromCopy` | Array of files/folders to exclude from deployment | `["node_modules", ".git", "*.log"]` |
+| `excludeFromCleanup` | Array of files/folders to preserve during cleanup | startsWith name patter `["Logs", "web.config", "appsettings.json"]` |
+| `excludeFromCopy` | Array of files/folders to exclude from deployment | starstWith name pattern `["appsettings"]` |
 
 ### Environment-Specific Configurations
 
