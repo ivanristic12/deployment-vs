@@ -43,6 +43,67 @@ function Write-Success { param($m) Write-Info $m "Green" }
 function Write-Warning { param($m) Write-Info $m "Yellow" }
 function Write-Error { param($m) Write-Info $m "Red" }
 
+function Compress-ArchiveCompat {
+    param(
+        [string]$Path,
+        [string]$DestinationPath,
+        [switch]$Force
+    )
+    
+    # Try native Compress-Archive first (PowerShell 5.0+)
+    if (Get-Command Compress-Archive -ErrorAction SilentlyContinue) {
+        Compress-Archive -Path $Path -DestinationPath $DestinationPath -Force:$Force
+    }
+    else {
+        # Fallback to .NET compression for PowerShell 4.0 (Server 2012 R2)
+        Add-Type -AssemblyName System.IO.Compression.FileSystem
+        
+        # Remove existing zip if Force is specified
+        if ($Force -and (Test-Path $DestinationPath)) {
+            Remove-Item $DestinationPath -Force
+        }
+        
+        # Handle wildcard in path (e.g., "C:\Folder\*")
+        if ($Path.EndsWith('\*') -or $Path.EndsWith('/*')) {
+            $sourcePath = Split-Path $Path -Parent
+            [System.IO.Compression.ZipFile]::CreateFromDirectory($sourcePath, $DestinationPath)
+        }
+        else {
+            [System.IO.Compression.ZipFile]::CreateFromDirectory($Path, $DestinationPath)
+        }
+    }
+}
+
+function Expand-ArchiveCompat {
+    param(
+        [string]$Path,
+        [string]$DestinationPath,
+        [switch]$Force
+    )
+    
+    # Try native Expand-Archive first (PowerShell 5.0+)
+    if (Get-Command Expand-Archive -ErrorAction SilentlyContinue) {
+        Expand-Archive -Path $Path -DestinationPath $DestinationPath -Force:$Force
+    }
+    else {
+        # Fallback to .NET extraction for PowerShell 4.0 (Server 2012 R2)
+        Add-Type -AssemblyName System.IO.Compression.FileSystem
+        
+        # .NET ExtractToDirectory requires empty/non-existent directory
+        # If Force is specified and directory exists, clear it first
+        if ($Force -and (Test-Path $DestinationPath)) {
+            Remove-Item -Path $DestinationPath -Recurse -Force -ErrorAction SilentlyContinue
+        }
+        
+        # Create destination directory if it doesn't exist
+        if (-not (Test-Path $DestinationPath)) {
+            New-Item -Path $DestinationPath -ItemType Directory -Force | Out-Null
+        }
+        
+        [System.IO.Compression.ZipFile]::ExtractToDirectory($Path, $DestinationPath)
+    }
+}
+
 #----------------End of functions-------------------------
 
 #---------------------Main--------------------------------------------------------------------
@@ -342,7 +403,7 @@ try {
             Write-Info "Staged $fileCount files. Compressing for transfer..."
             
             # Compress the staged files
-            Compress-Archive -Path "$localTempFolder\*" -DestinationPath $zipPath -Force
+            Compress-ArchiveCompat -Path "$localTempFolder\*" -DestinationPath $zipPath -Force
             
             $zipSize = (Get-Item $zipPath).Length / 1MB
             Write-Info "Compressed to $([math]::Round($zipSize, 2)) MB"
@@ -356,7 +417,19 @@ try {
             Write-Info "Extracting files on remote server..."
             Invoke-Command -Session $session -ScriptBlock {
                 param($zipPath, $destFolder)
-                Expand-Archive -Path $zipPath -DestinationPath $destFolder -Force
+                
+                # Use fallback for PowerShell 4.0+ support
+                if (Get-Command Expand-Archive -ErrorAction SilentlyContinue) {
+                    Expand-Archive -Path $zipPath -DestinationPath $destFolder -Force
+                }
+                else {
+                    Add-Type -AssemblyName System.IO.Compression.FileSystem
+                    if (-not (Test-Path $destFolder)) {
+                        New-Item -Path $destFolder -ItemType Directory -Force | Out-Null
+                    }
+                    [System.IO.Compression.ZipFile]::ExtractToDirectory($zipPath, $destFolder)
+                }
+                
                 Remove-Item -Path $zipPath -Force
             } -ArgumentList $remoteZipPath, $remoteTemp
             
@@ -448,7 +521,17 @@ try {
             
             if ($hasContent) {
                 Write-Log "Creating backup at: $backupPath"
-                Compress-Archive -Path "$AppFolderLocation\*" -DestinationPath $backupPath -Force
+                
+                # Use fallback for PowerShell 4.0+ support
+                if (Get-Command Compress-Archive -ErrorAction SilentlyContinue) {
+                    Compress-Archive -Path "$AppFolderLocation\*" -DestinationPath $backupPath -Force
+                }
+                else {
+                    Add-Type -AssemblyName System.IO.Compression.FileSystem
+                    if (Test-Path $backupPath) { Remove-Item $backupPath -Force }
+                    [System.IO.Compression.ZipFile]::CreateFromDirectory($AppFolderLocation, $backupPath)
+                }
+                
                 $result.BackupCreated = $true
                 $result.BackupPath = $backupPath
 				Write-Host "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') - Backup created successfully." -ForegroundColor "Green" 
@@ -591,7 +674,18 @@ catch {
                     
                     # Restore from backup
                     Write-Log "Extracting backup..."
-                    Expand-Archive -Path $BackupPath -DestinationPath $AppFolderLocation -Force
+                    
+                    # Use fallback for PowerShell 4.0+ support
+                    if (Get-Command Expand-Archive -ErrorAction SilentlyContinue) {
+                        Expand-Archive -Path $BackupPath -DestinationPath $AppFolderLocation -Force
+                    }
+                    else {
+                        Add-Type -AssemblyName System.IO.Compression.FileSystem
+                        if (-not (Test-Path $AppFolderLocation)) {
+                            New-Item -Path $AppFolderLocation -ItemType Directory -Force | Out-Null
+                        }
+                        [System.IO.Compression.ZipFile]::ExtractToDirectory($BackupPath, $AppFolderLocation)
+                    }
                     
                     # Restart app pool
                     Write-Log "Restarting app pool..."
