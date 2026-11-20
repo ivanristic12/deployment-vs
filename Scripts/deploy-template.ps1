@@ -1,7 +1,7 @@
 param(
     [string]$Username = "",
-    [string]$Password = "",
-    [string]$PasswordBase64 = "",
+    # SECURITY: the password is NOT a parameter. It is read from stdin (one base64 line),
+    # so it never appears on the command line, in process lists, logs or transcripts.
     [string]$Server = "",
     [string]$AppPoolName = "",
     [string]$AppFolderLocation = "",
@@ -125,15 +125,19 @@ $remoteTemp = $null
 try {
     Write-Success "Parameters set."
 
-    # Decode password from base64 if provided, otherwise use plain password
-    if ($PasswordBase64) {
-        $passwordBytes = [System.Convert]::FromBase64String($PasswordBase64)
-        $Password = [System.Text.Encoding]::Unicode.GetString($passwordBytes)
-    }
+    # Read password from stdin (base64 of UTF-16LE bytes). Strip anything that is not
+    # a base64 character (e.g. a BOM the host may prepend to the stream).
+    $stdinLine = [Console]::In.ReadLine()
+    if ([string]::IsNullOrEmpty($stdinLine)) { throw "Password was not provided on standard input." }
+    $passwordBytes = [System.Convert]::FromBase64String(($stdinLine -replace '[^A-Za-z0-9+/=]', ''))
+    $stdinLine = $null
+    $SecurePassword = New-Object System.Security.SecureString
+    foreach ($ch in [System.Text.Encoding]::Unicode.GetChars($passwordBytes)) { $SecurePassword.AppendChar($ch) }
+    $SecurePassword.MakeReadOnly()
+    [Array]::Clear($passwordBytes, 0, $passwordBytes.Length)
     Write-Info "Server: $Server"
 
     # Create credential object from provided username and password
-    $SecurePassword = ConvertTo-SecureString $Password -AsPlainText -Force
     $cred = New-Object System.Management.Automation.PSCredential($Username, $SecurePassword)
     Write-Success "Credentials prepared."
 
@@ -187,7 +191,28 @@ try {
             $result.ValidationErrors += "Application folder path is empty or invalid"
             return $result
         }
-        
+
+        # SAFETY: the deployment deletes everything inside the app folder. Refuse drive roots
+        # and system folders, so a wrong/malicious deploy.config.json can't wipe the server.
+        try {
+            $full = [System.IO.Path]::GetFullPath($AppFolderLocation).TrimEnd('\')
+            $root = [System.IO.Path]::GetPathRoot($full).TrimEnd('\')
+            $protected = @($env:windir, $env:ProgramFiles, ${env:ProgramFiles(x86)}, $env:ProgramData,
+                           (Split-Path $env:PUBLIC -Parent), ($env:SystemDrive + '\inetpub'), ($env:SystemDrive + '\inetpub\wwwroot')) |
+                         Where-Object { $_ } | ForEach-Object { $_.TrimEnd('\') }
+            $windir = $env:windir.TrimEnd('\')
+            $isProtected = ($full -eq $root) -or                                   # drive root, e.g. C:\
+                           ($protected -contains $full) -or                         # exact system folder
+                           $full.StartsWith("$windir\", [StringComparison]::OrdinalIgnoreCase)  # anything under Windows
+            if ($isProtected) {
+                $result.ValidationErrors += "Application folder '$AppFolderLocation' is a drive root or protected system folder - refusing to deploy there"
+                return $result
+            }
+        } catch {
+            $result.ValidationErrors += "Application folder path '$AppFolderLocation' is invalid"
+            return $result
+        }
+
         try {
             $parentFolder = Split-Path -Parent $AppFolderLocation
             

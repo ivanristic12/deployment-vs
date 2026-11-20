@@ -10,9 +10,9 @@ namespace IISDeployExtension.Dialogs
         public string Password { get; private set; }
         public string Configuration { get; private set; }
         
-        private Func<string, string, string, bool> validationCallback;
+        private Func<string, string, string, System.Threading.Tasks.Task<bool>> validationCallback;
 
-        public CredentialsDialog(string defaultConfiguration = "", Func<string, string, string, bool> validateCredentials = null)
+        public CredentialsDialog(string defaultConfiguration = "", Func<string, string, string, System.Threading.Tasks.Task<bool>> validateCredentials = null)
         {
             InitializeComponent();
             
@@ -22,9 +22,16 @@ namespace IISDeployExtension.Dialogs
 
             // Focus on username field
             Loaded += (s, e) => UsernameTextBox.Focus();
+
+            // Don't allow closing the window (X / Esc) while validation is running
+            Closing += (s, e) => { if (isValidating) e.Cancel = true; };
         }
 
-        private void OkButton_Click(object sender, RoutedEventArgs e)
+        private bool isValidating;
+
+#pragma warning disable VSTHRD100 // async void is required for WPF event handlers; all exceptions are caught below
+        private async void OkButton_Click(object sender, RoutedEventArgs e)
+#pragma warning restore VSTHRD100
         {
             // Validate inputs
             if (string.IsNullOrWhiteSpace(UsernameTextBox.Text))
@@ -52,14 +59,21 @@ namespace IISDeployExtension.Dialogs
                 // Show validating status
                 SetStatus("Validating credentials...", Brushes.Blue);
                 DisableInputs(true);
-
-                // Use dispatcher to update UI before validation
-                Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.Render);
+                CancelButton.IsEnabled = false;
+                isValidating = true;
 
                 try
                 {
-                    // Validate
-                    bool isValid = validationCallback(Username, Password, Configuration);
+                    // Validate (the callback runs the slow PowerShell work off the UI thread)
+                    bool isValid;
+                    try
+                    {
+                        isValid = await validationCallback(Username, Password, Configuration);
+                    }
+                    finally
+                    {
+                        isValidating = false;
+                    }
 
                     if (isValid)
                     {
@@ -80,6 +94,10 @@ namespace IISDeployExtension.Dialogs
                     MessageBox.Show($"Validation error: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
                     SetStatus("", Brushes.Black);
                     DisableInputs(false);
+                }
+                finally
+                {
+                    CancelButton.IsEnabled = true;
                 }
             }
             else

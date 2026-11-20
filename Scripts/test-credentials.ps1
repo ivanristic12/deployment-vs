@@ -5,12 +5,9 @@ param(
     [Parameter(Mandatory=$true)]
     [string]$Username,
     
-    [Parameter(Mandatory=$false)]
-    [string]$Password,
-    
-    [Parameter(Mandatory=$false)]
-    [string]$PasswordBase64,
-    
+    # SECURITY: the password is NOT a parameter. It is read from stdin (one base64 line),
+    # so it never appears on the command line, in process lists, logs or transcripts.
+
     [Parameter(Mandatory=$true)]
     [string]$TestPath  # AppFolderLocation from deploy.config.json
 )
@@ -36,14 +33,17 @@ function Convert-LocalPathToUNC {
 }
 
 try {
-    # Decode password from base64 if provided, otherwise use plain password
-    if ($PasswordBase64) {
-        $passwordBytes = [System.Convert]::FromBase64String($PasswordBase64)
-        $Password = [System.Text.Encoding]::Unicode.GetString($passwordBytes)
-    }
-    # Create secure string from plain text password
-    $SecurePassword = ConvertTo-SecureString $Password -AsPlainText -Force
-    
+    # Read password from stdin (base64 of UTF-16LE bytes). Strip anything that is not
+    # a base64 character (e.g. a BOM the host may prepend to the stream).
+    $stdinLine = [Console]::In.ReadLine()
+    if ([string]::IsNullOrEmpty($stdinLine)) { throw "Password was not provided on standard input." }
+    $passwordBytes = [System.Convert]::FromBase64String(($stdinLine -replace '[^A-Za-z0-9+/=]', ''))
+    $stdinLine = $null
+    $SecurePassword = New-Object System.Security.SecureString
+    foreach ($ch in [System.Text.Encoding]::Unicode.GetChars($passwordBytes)) { $SecurePassword.AppendChar($ch) }
+    $SecurePassword.MakeReadOnly()
+    [Array]::Clear($passwordBytes, 0, $passwordBytes.Length)
+
     # Create credential object
     $Credential = New-Object System.Management.Automation.PSCredential($Username, $SecurePassword)
     

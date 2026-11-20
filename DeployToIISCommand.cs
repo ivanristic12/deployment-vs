@@ -73,6 +73,15 @@ namespace IISDeployExtension
         {
             ThreadHelper.ThrowIfNotOnUIThread();
 
+            // Run the whole flow asynchronously so that slow work (PowerShell remoting,
+            // dotnet publish, deployment) never blocks the Visual Studio UI thread.
+            package.JoinableTaskFactory.RunAsync(ExecuteAsync).FileAndForget("IISDeployExtension/DeployToIIS");
+        }
+
+        private async Task ExecuteAsync()
+        {
+            await package.JoinableTaskFactory.SwitchToMainThreadAsync(package.DisposalToken);
+
             try
             {
                 var project = GetSelectedProject();
@@ -127,13 +136,27 @@ namespace IISDeployExtension
                 string configuration = null;
 
                 // Show credentials dialog with validation callback
-                var dialog = new CredentialsDialog("", (user, pass, conf) =>
+                var dialog = new CredentialsDialog("", async (user, pass, conf) =>
                 {
                     try
                     {
+                        // SECURITY: the configuration name is used in a file name, on the dotnet
+                        // command line and in a folder that gets deleted (bin\{conf}\publish),
+                        // so only allow a plain name - no path separators, "..", quotes or spaces.
+                        if (!string.IsNullOrWhiteSpace(conf) &&
+                            (!System.Text.RegularExpressions.Regex.IsMatch(conf, @"^[A-Za-z0-9_\-\.]+$") || conf.Contains("..")))
+                        {
+                            System.Windows.MessageBox.Show(
+                                "Invalid configuration name.\n\nUse only letters, digits, '-', '_' and '.' (e.g. Release, prod, Staging).",
+                                "Invalid Configuration",
+                                System.Windows.MessageBoxButton.OK,
+                                System.Windows.MessageBoxImage.Warning);
+                            return false;
+                        }
+
                         // Determine which config file to use
                         string configFileToUse = configPath; // Default: deploy.config.json
-                        
+
                         if (!string.IsNullOrWhiteSpace(conf))
                         {
                             // User entered a configuration name (e.g., "prod")
@@ -170,17 +193,26 @@ namespace IISDeployExtension
                             config = ConfigurationReader.ReadConfiguration(configFileToUse);
                         }
                         
-                        // Test credentials using config values
-                        var testResult = executor.TestCredentials(
+                        // Test credentials using config values - on a background thread,
+                        // so the dialog and Visual Studio stay responsive while PowerShell
+                        // starts up and opens the remote session.
+                        var server = config.Server;
+                        var appFolder = config.AppFolderLocation;
+                        var testResult = await Task.Run(() => executor.TestCredentials(
                             testScriptPath,
-                            config.Server,
+                            server,
                             user,
                             ConvertToSecureString(pass),
-                            config.AppFolderLocation);
+                            appFolder));
 
                         if (!testResult.Success)
                         {
                             var errorMsg = testResult.GetErrors();
+                            if (string.IsNullOrWhiteSpace(errorMsg))
+                            {
+                                // test-credentials.ps1 writes its failure details to stdout
+                                errorMsg = testResult.GetOutput();
+                            }
                             if (string.IsNullOrWhiteSpace(errorMsg))
                             {
                                 errorMsg = "Unknown authentication error occurred.";
@@ -228,7 +260,9 @@ namespace IISDeployExtension
 
                 // Publish the project
                 WriteOutput("\nPublishing project...");
-                string buildOutputPath = BuildProject(project, configuration);
+                string buildOutputPath = await BuildProjectAsync(project, configuration);
+
+                await package.JoinableTaskFactory.SwitchToMainThreadAsync(package.DisposalToken);
 
                 if (string.IsNullOrEmpty(buildOutputPath))
                 {
@@ -252,60 +286,52 @@ namespace IISDeployExtension
                     return;
                 }
 
+                WriteOutput("Deployment is running in background...");
+                WriteOutput("You can continue working in Visual Studio.\n");
+
                 // Run deployment on background thread with real-time output
-                System.Threading.Tasks.Task.Run(() =>
+                // (WriteOutput is thread-safe, no need to switch to the UI thread per line)
+                var deployResult = await Task.Run(() => executor.ExecuteDeploy(
+                    deployScriptPath,
+                    config.Server,
+                    username,
+                    ConvertToSecureString(password),
+                    config.PoolName,
+                    config.AppFolderLocation,
+                    buildOutputPath,
+                    config.BackupFolderLocation,
+                    config.ExcludeFromCleanup,
+                    config.ExcludeFromCopy,
+                    WriteOutput));
+
+                // Show final result on UI thread
+                await package.JoinableTaskFactory.SwitchToMainThreadAsync(package.DisposalToken);
+
+                if (deployResult.Success)
                 {
-                    var deployResult = executor.ExecuteDeploy(
-                        deployScriptPath,
-                        config.Server,
-                        username,
-                        ConvertToSecureString(password),
-                        config.PoolName,
-                        config.AppFolderLocation,
-                        buildOutputPath,
-                        config.BackupFolderLocation,
-                        config.ExcludeFromCleanup,
-                        config.ExcludeFromCopy,
-                        (line) =>
-                        {
-                            // Output each line as it comes from PowerShell
-                            ThreadHelper.JoinableTaskFactory.Run(async () =>
-                            {
-                                await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-                                WriteOutput(line);
-                            });
-                        });
-
-                    // Show final result on UI thread
-                    ThreadHelper.JoinableTaskFactory.Run(async () =>
+                    WriteOutput("\n========================================");
+                    WriteOutput("DEPLOYMENT COMPLETED SUCCESSFULLY!");
+                    WriteOutput("========================================");
+                }
+                else
+                {
+                    WriteOutput("\n========================================");
+                    WriteOutput("DEPLOYMENT FAILED!");
+                    WriteOutput("========================================");
+                    if (!string.IsNullOrEmpty(deployResult.GetErrors()))
                     {
-                        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-
-                        if (deployResult.Success)
-                        {
-                            WriteOutput("\n========================================");
-                            WriteOutput("DEPLOYMENT COMPLETED SUCCESSFULLY!");
-                            WriteOutput("========================================");
-                        }
-                        else
-                        {
-                            WriteOutput("\n========================================");
-                            WriteOutput("DEPLOYMENT FAILED!");
-                            WriteOutput("========================================");
-                            if (!string.IsNullOrEmpty(deployResult.GetErrors()))
-                            {
-                                WriteOutput(deployResult.GetErrors());
-                            }
-                            ShowMessage("Error", $"Deployment failed. Check the Output window for details.");
-                        }
-                    });
-                });
-
-                WriteOutput("\nDeployment is running in background...");
-                WriteOutput("You can continue working in Visual Studio.");
+                        WriteOutput(deployResult.GetErrors());
+                    }
+                    ShowMessage("Error", $"Deployment failed. Check the Output window for details.");
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                // Visual Studio is shutting down
             }
             catch (Exception ex)
             {
+                await package.JoinableTaskFactory.SwitchToMainThreadAsync();
                 ShowMessage("Error", $"Deployment failed: {ex.Message}");
             }
         }
@@ -424,24 +450,45 @@ namespace IISDeployExtension
             }
         }
 
-        private string BuildProject(Project project, string configuration)
+        private async System.Threading.Tasks.Task<string> BuildProjectAsync(Project project, string configuration)
         {
-            ThreadHelper.ThrowIfNotOnUIThread();
+            await package.JoinableTaskFactory.SwitchToMainThreadAsync(package.DisposalToken);
 
             try
             {
+                // Read everything we need from DTE while on the UI thread
                 string projectDir = GetProjectDirectory(project);
                 string projectFile = project.FileName;
-                
+
                 // Use Release as default if no configuration specified
                 string buildConfig = string.IsNullOrWhiteSpace(configuration) ? "Release" : configuration;
-                
+
                 // Check if it's an SDK-style project (.NET Core/.NET 5+)
                 // SDK-style projects use dotnet publish for deployment
                 bool isSdkStyleProject = IsSdkStyleProject(projectFile);
-                string targetFramework = GetTargetFramework(projectFile);
-                
+
                 if (isSdkStyleProject)
+                {
+                    // dotnet publish runs entirely on a background thread so VS stays responsive
+                    return await Task.Run(() => PublishSdkProject(projectDir, projectFile, buildConfig));
+                }
+                else
+                {
+                    return BuildLegacyProject(project, projectDir, buildConfig);
+                }
+            }
+            catch (Exception ex)
+            {
+                WriteOutput($"Build error: {ex.Message}");
+                WriteOutput($"Stack trace: {ex.StackTrace}");
+                return null;
+            }
+        }
+
+        private string PublishSdkProject(string projectDir, string projectFile, string buildConfig)
+        {
+            try
+            {
                 {
                     // Use dotnet publish for SDK-style projects with explicit output path
                     string publishPath = Path.Combine(projectDir, "bin", buildConfig, "publish");
@@ -467,8 +514,8 @@ namespace IISDeployExtension
                     
                     var startInfo = new System.Diagnostics.ProcessStartInfo
                     {
-                        FileName = "dotnet",
-                        Arguments = $"publish \"{projectFile}\" -c {buildConfig} -o \"{publishPath}\" --no-self-contained --force",
+                        FileName = PowerShellExecutor.ResolveDotnetPath(),
+                        Arguments = $"publish {PowerShellExecutor.Q(projectFile)} -c {PowerShellExecutor.Q(buildConfig)} -o {PowerShellExecutor.Q(publishPath)} --no-self-contained --force",
                         RedirectStandardOutput = true,
                         RedirectStandardError = true,
                         UseShellExecute = false,
@@ -478,6 +525,9 @@ namespace IISDeployExtension
 
                     using (var process = System.Diagnostics.Process.Start(startInfo))
                     {
+                        // Read stderr concurrently, otherwise a full stderr buffer can deadlock the process
+                        var errorsTask = process.StandardError.ReadToEndAsync();
+
                         // Stream filtered output - only show important messages
                         while (!process.StandardOutput.EndOfStream)
                         {
@@ -504,7 +554,7 @@ namespace IISDeployExtension
                         process.WaitForExit();
                         
                         // Check for errors
-                        string errors = process.StandardError.ReadToEnd();
+                        string errors = errorsTask.GetAwaiter().GetResult();
                         
                         if (process.ExitCode != 0)
                         {
@@ -536,7 +586,21 @@ namespace IISDeployExtension
                     WriteOutput($"ERROR: Publish folder not found at {publishPath}");
                     return null;
                 }
-                else
+            }
+            catch (Exception ex)
+            {
+                WriteOutput($"Build error: {ex.Message}");
+                WriteOutput($"Stack trace: {ex.StackTrace}");
+                return null;
+            }
+        }
+
+        private string BuildLegacyProject(Project project, string projectDir, string buildConfig)
+        {
+            ThreadHelper.ThrowIfNotOnUIThread();
+
+            try
+            {
                 {
                     // Use DTE build for legacy projects
                     var solutionBuild = dte.Solution.SolutionBuild;
@@ -673,22 +737,20 @@ namespace IISDeployExtension
         {
             try
             {
-                ThreadHelper.JoinableTaskFactory.Run(async () =>
+                // The pane is created by ActivateOutputWindow() on the UI thread before any
+                // background work starts. OutputStringThreadSafe can be called from any thread,
+                // so we don't block background threads by marshalling every line to the UI thread.
+                if (outputPane == null && ThreadHelper.CheckAccess())
                 {
-                    await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+#pragma warning disable VSTHRD010 // guarded by CheckAccess()
+                    var outWindow = Package.GetGlobalService(typeof(SVsOutputWindow)) as IVsOutputWindow;
+                    var customGuid = new Guid("B2C3D4E5-6F78-90AB-CDEF-123456789ABC");
+                    outWindow?.CreatePane(ref customGuid, "Deploy to IIS", 1, 1);
+                    outWindow?.GetPane(ref customGuid, out outputPane);
+#pragma warning restore VSTHRD010
+                }
 
-                    if (outputPane == null)
-                    {
-                        var outWindow = Package.GetGlobalService(typeof(SVsOutputWindow)) as IVsOutputWindow;
-                        var customGuid = new Guid("B2C3D4E5-6F78-90AB-CDEF-123456789ABC");
-                        outWindow?.CreatePane(ref customGuid, "Deploy to IIS", 1, 1);
-                        outWindow?.GetPane(ref customGuid, out outputPane);
-                    }
-
-                    // Activate the pane to keep it visible
-                    outputPane?.Activate();
-                    outputPane?.OutputStringThreadSafe(message + "\n");
-                });
+                outputPane?.OutputStringThreadSafe(message + "\n");
             }
             catch
             {
